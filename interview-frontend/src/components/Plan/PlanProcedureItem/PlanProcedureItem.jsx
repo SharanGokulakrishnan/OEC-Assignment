@@ -1,91 +1,89 @@
 import React, { useEffect, useState } from "react";
 import ReactSelect from "react-select";
 import {
-  getAssignedUsers,
+  getUsersForProcedure,
   assignUserToProcedure,
   removeUserFromProcedure,
+  addProcedureToPlan,
   removeAllUsersFromProcedure,
-} from "../../../api/api"; // Adjust path if needed
+} from "../../../api/api";
 
-const PlanProcedureItem = ({ planId, procedure, users }) => {
+const PlanProcedureItem = ({ procedure, users, planId }) => {
   const [selectedUsers, setSelectedUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
 
-  const procedureId = procedure?.procedureId;
-
-  // Load assigned users when plan or procedure changes
   useEffect(() => {
-    if (!procedureId) return;
+    let isMounted = true; // flag to track component mount status
 
-    const fetchAssignedUsers = async () => {
-      setIsLoading(true);
+    (async () => {
       try {
-        const data = await getAssignedUsers(procedureId);
+        const assigned = await getUsersForProcedure(
+          planId,
+          procedure.procedureId
+        );
+        const mapped = assigned.map((u) => ({
+          label: u.name,
+          value: u.userId,
+        }));
 
-        // Format the result to match ReactSelect
-        const formatted = Array.isArray(data)
-          ? data.map((u) => ({
-              label: u.name,
-              value: u.userId,
-            }))
-          : [];
-
-        setSelectedUsers(formatted);
+        // Only set state if component is still mounted
+        if (isMounted) {
+          setSelectedUsers(mapped);
+        }
       } catch (err) {
-        console.error("Failed to load assigned users", err);
-        setSelectedUsers([]); // Fallback to empty list
-      } finally {
-        setIsLoading(false);
+        console.error("Failed to load assigned users:", err);
       }
+    })();
+
+    return () => {
+      isMounted = false; // cleanup on unmount
     };
+  }, [planId, procedure.procedureId]);
 
-    fetchAssignedUsers();
-  }, [planId, procedureId]);
+  const handleAssignUserToProcedure = async (selectedOptions) => {
+    const previous = selectedUsers.map((u) => u.value);
+    const current = selectedOptions.map((u) => u.value);
 
-  const handleAssignUsers = async (newSelected) => {
-    const newlyAdded =
-      newSelected?.filter(
-        (user) => !selectedUsers.some((u) => u.value === user.value)
-      ) || [];
+    if (selectedOptions.length === 0 && previous.length > 0) {
+      try {
+        await removeAllUsersFromProcedure(planId, procedure.procedureId);
+        setSelectedUsers([]);
+      } catch (err) {
+        console.error("Error removing all assigned users:", err);
+      }
+      return;
+    }
 
-    const removed =
-      selectedUsers?.filter(
-        (user) => !newSelected?.some((u) => u.value === user.value)
-      ) || [];
+    const removed = previous.filter((id) => !current.includes(id));
+    const added = current.filter((id) => !previous.includes(id));
 
     try {
-      for (const user of newlyAdded) {
-        await assignUserToProcedure(planId, procedureId, user.value);
+      await addProcedureToPlan(planId, procedure.procedureId);
+
+      for (const userId of added) {
+        await assignUserToProcedure(planId, procedure.procedureId, userId);
       }
 
-      if (
-        removed.length === selectedUsers.length &&
-        newSelected?.length === 0
-      ) {
-        await removeAllUsersFromProcedure(planId, procedureId);
-      } else {
-        for (const user of removed) {
-          await removeUserFromProcedure(planId, procedureId, user.value);
-        }
+      for (const userId of removed) {
+        await removeUserFromProcedure(planId, procedure.procedureId, userId);
       }
 
-      setSelectedUsers(newSelected || []);
+      setSelectedUsers(selectedOptions);
     } catch (err) {
-      console.error("Error updating user assignments", err);
+      console.error("Error updating user assignments:", err);
     }
   };
 
   return (
-    <div className="py-4 border-b">
-      <div className="font-bold mb-2">{procedure.procedureTitle}</div>
+    <div className='py-2'>
+      <div>{procedure.procedureTitle}</div>
 
       <ReactSelect
-        isMulti
-        isLoading={isLoading}
+        className='mt-2'
+        placeholder='Select User to Assign'
+        isMulti={true}
         options={users}
         value={selectedUsers}
-        onChange={handleAssignUsers}
-        placeholder="Select User to Assign"
+        onChange={handleAssignUserToProcedure}
       />
     </div>
   );

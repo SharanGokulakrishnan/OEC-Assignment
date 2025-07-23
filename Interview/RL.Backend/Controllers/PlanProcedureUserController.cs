@@ -1,86 +1,74 @@
+using global::RL.Backend.Commands.PlanProcedureUsers;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using RL.Backend.Models;
 using RL.Data;
 using RL.Data.DataModels;
-using Microsoft.EntityFrameworkCore;
-namespace RL.Backend.Controllers;
 
-
-[ApiController]
-[Route("[controller]")]
-public class PlanProcedureUserController : ControllerBase
+namespace RL.Backend.Controllers
 {
-    private readonly RLContext _context;
-
-    public PlanProcedureUserController(RLContext context)
+    [ApiController]
+    [Route("[controller]")]
+    public class PlanProcedureUsersController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly RLContext _context;
+        private readonly IMediator _mediator;
 
-    [HttpGet("{procedureId}")]
-public async Task<IActionResult> GetAssignedUsers(int procedureId)
-{
-    try
-    {
-        var users = await _context.PlanProcedureUsers
-    .Where(ppu => ppu.ProcedureId == procedureId && ppu.User != null)
-    .Include(ppu => ppu.User)
-    .Select(ppu => new { ppu.User.UserId, ppu.User.Name })
-    .ToListAsync();
-
-        return Ok(users);
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine(ex); // Or use ILogger
-
-        return StatusCode(500, "Internal server error while fetching users.");
-    }
-}
-
-
-    [HttpPost]
-public IActionResult AssignUser([FromBody] RL.Data.DataModels.PlanProcedureUser model)
-    {
-        var exists = _context.PlanProcedureUsers.Any(x =>
-            x.ProcedureId == model.ProcedureId &&
-            x.UserId == model.UserId);
-
-        if (!exists)
+        public PlanProcedureUsersController(RLContext context, IMediator mediator)
         {
-            _context.PlanProcedureUsers.Add(model);
-            _context.SaveChanges();
-            return Ok(new { message = "Successfully added" });
+            _context = context;
+            _mediator = mediator;
         }
 
-        return Ok();
-    }
-
-        [HttpDelete("{planId}/{procedureId}/{userId}")]
-    public IActionResult RemoveUser(int planId, int procedureId, int userId)
-    {
-        var entity = _context.PlanProcedureUsers
-            .FirstOrDefault(x => x.PlanId == planId && x.ProcedureId == procedureId && x.UserId == userId);
-
-        if (entity != null)
+        [HttpPost]
+        public async Task<IActionResult> AssignUser([FromBody] AssignUserToProcedureCommand command)
         {
-            _context.PlanProcedureUsers.Remove(entity);
-            _context.SaveChanges();
+            var result = await _mediator.Send(command);
+            return result.ToActionResult();
         }
 
-        return Ok();
-    }
+        [HttpDelete("{planId:int}/{procedureId:int}/{userId:int}")]
+        public async Task<IActionResult> RemoveUser(int planId, int procedureId, int userId)
+        {
+            var result = await _mediator.Send(new RemoveUserFromProcedureCommand
+            {
+                PlanId = planId,
+                ProcedureId = procedureId,
+                UserId = userId
+            });
 
-    [HttpDelete("{planId}/{procedureId}")]
-    public IActionResult RemoveAllUsers(int planId, int procedureId)
-    {
-        var users = _context.PlanProcedureUsers
-            .Where(x => x.PlanId == planId && x.ProcedureId == procedureId)
-            .ToList();
+            return result.ToActionResult();
+        }
 
-        _context.PlanProcedureUsers.RemoveRange(users);
-        _context.SaveChanges();
+        [HttpDelete("{planId:int}/{procedureId:int}")]
+        public async Task<IActionResult> RemoveAllUsers(int planId, int procedureId)
+        {
+            var result = await _mediator.Send(new RemoveAllUsersFromProcedureCommand
+            {
+                PlanId = planId,
+                ProcedureId = procedureId
+            });
 
-            return Ok(new { message = "Users removed" });
+            return result.ToActionResult();
+        }
 
+        [HttpGet("{planId:int}/{procedureId:int}")]
+        public async Task<ActionResult<IEnumerable<User>>> GetAssignedUsers(int planId, int procedureId)
+        {
+            if (planId < 1)
+                return BadRequest($"Invalid PlanId: {planId}. Must be greater than zero.");
+
+            if (procedureId < 1)
+                return BadRequest($"Invalid ProcedureId: {procedureId}. Must be greater than zero.");
+
+            var users = await _context.PlanProcedureUsers
+                .Where(pu => pu.PlanId == planId && pu.ProcedureId == procedureId)
+                .Include(pu => pu.User)
+                .Select(pu => pu.User)
+                .ToListAsync();
+
+            return Ok(users);
+        }
     }
 }
